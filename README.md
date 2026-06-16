@@ -1,13 +1,6 @@
 <div align="center">
 
-```
-███████╗██╗     ███████╗██████╗ ██████╗  ██████╗
-██╔════╝██║     ██╔════╝██╔══██╗██╔══██╗██╔════╝
-█████╗  ██║     █████╗  ██║  ██║██████╔╝██║  ███╗
-██╔══╝  ██║     ██╔══╝  ██║  ██║██╔══██╗██║   ██║
-███████╗███████╗██║     ██████╔╝██████╔╝╚██████╔╝
-╚══════╝╚══════╝╚═╝     ╚═════╝ ╚═════╝  ╚═════╝
-```
+# ELFdbg
 
 **Browser-based ELF binary emulator and reverse engineering debugger**
 
@@ -62,12 +55,6 @@ Both **static** and **dynamically linked / PIE** binaries are supported. Dynamic
 
 ### COA Monitor — Pipeline Waterfall + Cache Hierarchy
 ![COA panel showing 5-stage pipeline waterfall, cache hierarchy, and branch predictor](docs/screenshots/coa_pipeline.png)
-
-### COA Monitor — Memory Layout + Root Cause Analysis
-![Memory layout panel showing address-space map and dynamic linking root cause cards](docs/screenshots/coa_memory.png)
-
-### Execution Trace + Syscall Log
-![Execution trace panel showing instruction history with syscall badges and memory access indicators](docs/screenshots/trace.png)
 
 ---
 
