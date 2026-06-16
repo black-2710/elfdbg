@@ -27,7 +27,7 @@ Both **static** and **dynamically linked / PIE** binaries are supported. Dynamic
 ## Screenshots
 
 ### Main Debugger — Disassembly + Registers
-![Disassembly view showing annotated x86-64 instructions with register panel and stack](docs/screenshots/disasm.png)
+![Disassembly view showing annotated x86-64 instructions with register panel and stack](docs/screenshot_disassmbler.png)
 
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
@@ -52,7 +52,7 @@ Both **static** and **dynamically linked / PIE** binaries are supported. Dynamic
 ```
 
 ### COA Monitor — Pipeline Waterfall + Cache Hierarchy
-![COA panel showing 5-stage pipeline waterfall, cache hierarchy, and branch predictor](docs/screenshots/coa_pipeline.png)
+![COA panel showing 5-stage pipeline waterfall, cache hierarchy, and branch predictor](docs/screenshot_coa.png)
 
 ---
 

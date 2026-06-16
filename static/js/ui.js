@@ -60,12 +60,13 @@ function toast(msg, type = 'info', duration = 2800) {
 // ─────────────────────────────────────────────────────
 const S = {
   loaded:   false,
+  faulted:  false,
   arch:     'x86_64',
   ip:       0,
   regs:     {},
   prevRegs: {},
   breakpoints:       {},
-  disasmInsns:       [],   // last rendered instruction list
+  disasmInsns:       [],
   currentTab:        'disasm',
   currentAnalysisTab:'stats',
   polling:  null,
@@ -80,9 +81,20 @@ function setStatus(state) {
   const label = document.getElementById('status-label');
   dot.className = 'status-dot ' + state;
   label.textContent = {
-    running:'Running', stopped:'Stopped',
+    running:'Running', stopped:'Stopped', faulted:'FAULTED',
     ready:'Ready', loading:'Loading…', '':'No binary',
   }[state] ?? state;
+  if (state === 'faulted') {
+    dot.style.background = 'var(--red)';
+    dot.style.boxShadow  = '0 0 8px var(--red)';
+    ['btn-run','btn-step','btn-stepo'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.disabled = true;
+    });
+  } else {
+    dot.style.background = '';
+    dot.style.boxShadow  = '';
+  }
 }
 function enableControls(on) {
   ['btn-run','btn-step','btn-stepo','btn-reset','btn-stop'].forEach(id => {
@@ -108,13 +120,15 @@ document.getElementById('file-input').addEventListener('change', async e => {
     const r = await fetch('/api/upload', { method: 'POST', body: fd });
     const data = await r.json();
     if (data.error) throw new Error(data.error);
-    S.loaded = true;
-    S.arch   = data.arch;
-    S.ip     = data.entry_point;
+    S.loaded  = true;
+    S.faulted = false;
+    S.arch    = data.arch;
+    S.ip      = data.entry_point;
     document.getElementById('binary-name').textContent = file.name;
     document.getElementById('binary-name').style.color = 'var(--accent)';
     setStatus('ready');
-    toast(`Loaded ${file.name} (${data.arch}, ${fmtBytes(data.file_size)})`, 'ok');
+    const dynTag = data.is_dynamic ? ` · ${data.is_pie ? 'PIE' : 'DYN'} — GOT stubs installed` : ' · static';
+    toast(`Loaded ${file.name} (${data.arch}${dynTag}, ${fmtBytes(data.file_size)})`, 'ok', 4000);
     enableControls(true);
     await Promise.all([
       loadDisasm(data.entry_point),
@@ -137,13 +151,18 @@ document.getElementById('file-input').addEventListener('change', async e => {
 // Execution controls
 // ─────────────────────────────────────────────────────
 document.getElementById('btn-run').addEventListener('click', async () => {
+  if (S.faulted) { toast('Emulator faulted — press ↺ Reset to restart', 'err'); return; }
   setStatus('running');
   try {
     const st = await API.post('/api/emulate/start',
       { begin: S.ip, timeout: 3000000, count: 500000 });
     await handleStateUpdate(st);
+    if (st.plt_calls && st.plt_calls.length) {
+      const syms = [...new Set(st.plt_calls.map(c => c.symbol))].join(', ');
+      toast(`PLT intercepted: ${syms} → returned 0`, 'warn', 3500);
+    }
   } catch (err) { toast(err.message, 'err'); }
-  setStatus('stopped');
+  if (!S.faulted) setStatus('stopped');
 });
 
 document.getElementById('btn-stop').addEventListener('click', async () => {
@@ -158,18 +177,28 @@ document.getElementById('btn-stepo').addEventListener('click', () => step(1));
 document.getElementById('btn-reset').addEventListener('click', async () => {
   try {
     await API.post('/api/emulate/reset');
-    S.ip = 0;
+    S.ip      = 0;
+    S.faulted = false;
     clearTrace();
-    toast('Emulator reset', 'info');
+    enableControls(true);
     setStatus('ready');
+    toast('Emulator reset', 'info');
     await refreshState();
   } catch (err) { toast(err.message, 'err'); }
 });
 
 async function step(count = 1) {
+  if (S.faulted) {
+    toast('Emulator faulted — press ↺ Reset to restart', 'err');
+    return;
+  }
   try {
     const st = await API.post('/api/emulate/step', { count });
     await handleStateUpdate(st);
+    if (st.plt_calls && st.plt_calls.length) {
+      const syms = [...new Set(st.plt_calls.map(c => c.symbol))].join(', ');
+      toast(`PLT intercepted: ${syms} → returned 0`, 'warn', 3500);
+    }
   } catch (err) { toast(err.message, 'err'); }
 }
 
@@ -177,9 +206,32 @@ async function handleStateUpdate(st) {
   S.prevRegs = { ...S.regs };
   S.regs     = st.registers || S.regs;
   const ip   = st.ip || 0;
+  S.faulted  = !!st.faulted;
   updateIpDisplay(ip);
   renderRegs(S.regs, S.prevRegs);
-  highlightCurrentIp(ip);
+
+  if (S.faulted) {
+    setStatus('faulted');
+    // Don't try to disassemble null/garbage address
+    if (ip < 0x10000) {
+      const tbody = document.getElementById('disasm-tbody');
+      if (tbody) {
+        tbody.innerHTML = `<tr><td colspan="6">
+          <div class="empty-state" style="height:100px;gap:8px">
+            <div style="font-size:28px">💥</div>
+            <div style="color:var(--red);font-weight:700;font-size:13px">Emulator faulted at ${hex64(ip)}</div>
+            <div style="color:var(--muted);font-size:11px">${escHtml(st.error || 'Unmapped memory fetch — RIP landed at 0x0 (likely a missing PLT/GOT stub)')}</div>
+            <div style="color:var(--muted);font-size:11px">Press <strong style="color:var(--accent)">↺ Reset</strong> to restart from entry point</div>
+          </div>
+        </td></tr>`;
+      }
+    } else {
+      highlightCurrentIp(ip);
+    }
+    toast(st.error || `Faulted at ${hex64(ip)} — press ↺ Reset`, 'err', 6000);
+  } else {
+    highlightCurrentIp(ip);
+  }
   await refreshTrace();
   await refreshStack();
 }

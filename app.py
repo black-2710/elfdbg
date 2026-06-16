@@ -42,8 +42,9 @@ from typing import Optional
 from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
 
-from analyzer import ELFAnalyzer, analyse_trace, disassemble_bytes, disassemble_region
+from analyzer import ELFAnalyzer, analyse_trace, disassemble_bytes, disassemble_region, load_dynamic_into_emulator
 from emulator import ELFEmulator
+from coa_monitor import COAMonitor
 
 # ──────────────────────────────────────────────
 # App setup
@@ -136,10 +137,13 @@ def upload():
             _coa.load_binary(_analyzer)
 
         logger.info("Loaded %s (%d bytes) arch=%s", f.filename, len(data), _analyzer.arch)
+        summary = _analyzer.summary()
+        # Use emulator's entry_point which has load_base applied for PIE/dynamic
+        summary["entry_point"] = _emulator.entry_point
         return jsonify({
             "status": "ok",
             "filename": f.filename,
-            **_analyzer.summary(),
+            **summary,
         })
     except Exception as e:
         logger.exception("Upload error")
@@ -325,8 +329,21 @@ def emu_reset():
     with _state_lock:
         _emulator = ELFEmulator(_analyzer.arch)
         _analyzer.load_into_emulator(_emulator)
+        # Reset COA monitor so metrics restart from zero
+        coa = _get_coa()
+        coa._last_trace_len = 0
+        from coa_monitor import BranchLayoutMonitor, PipelineLayoutMonitor, CacheLayoutMonitor, ProcessingMonitor
+        coa.branch     = BranchLayoutMonitor()
+        coa.pipeline   = PipelineLayoutMonitor()
+        coa.cache      = CacheLayoutMonitor()
+        coa.processing = ProcessingMonitor()
 
-    return jsonify({"status": "reset", "ip": _emulator.entry_point})
+    return jsonify({
+        "status":     "reset",
+        "ip":         _emulator.entry_point,
+        "faulted":    False,
+        "is_dynamic": _analyzer.is_dynamic,
+    })
 
 
 # ──────────────────────────────────────────────
@@ -585,14 +602,9 @@ def health():
 # Entry
 # ──────────────────────────────────────────────
 
-if __name__ == "__main__":
-    app.run(debug=True, host="0.0.0.0", port=5000, threaded=True)
-
 # ══════════════════════════════════════════════════════════════════════
 # COA (Class-of-Architecture) Monitor  –  routes
 # ══════════════════════════════════════════════════════════════════════
-from coa_monitor import COAMonitor
-from analyzer import load_dynamic_into_emulator
 
 _coa: Optional[COAMonitor] = None
 
@@ -720,3 +732,7 @@ def upload_dynamic():
     except Exception as e:
         logger.exception("Dynamic upload error")
         return jsonify({"error": str(e)}), 500
+
+
+if __name__ == '__main__':
+    app.run(debug=True, host='0.0.0.0', port=5000, threaded=True)
