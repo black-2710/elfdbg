@@ -26,8 +26,6 @@ Both **static** and **dynamically linked / PIE** binaries are supported. Dynamic
 
 ## Screenshots
 
-> **Add your screenshots here** — drag images into this section on GitHub, or place them in `docs/screenshots/` and update the paths below.
-
 ### Main Debugger — Disassembly + Registers
 ![Disassembly view showing annotated x86-64 instructions with register panel and stack](docs/screenshots/disasm.png)
 
