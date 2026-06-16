@@ -27,7 +27,7 @@ Both **static** and **dynamically linked / PIE** binaries are supported. Dynamic
 ## Screenshots
 
 ### Main Debugger — Disassembly + Registers
-![Disassembly view showing annotated x86-64 instructions with register panel and stack](docs/screenshot_disassmbler.png)
+![Disassembly view showing annotated x86-64 instructions with register panel and stack](docs/screenshot_disassembler.png)
 
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
