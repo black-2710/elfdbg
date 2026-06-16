@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ELFDebugger — Binary Emulation &amp; COA Monitor</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+  <link rel="stylesheet" href="/static/css/coa.css">
+</head>
+<body>
+
+<div id="app">
+
+  <!-- ═══════════════════ TOOLBAR ═══════════════════ -->
+  <div id="toolbar">
+    <div class="logo">ELF<span>dbg</span></div>
+
+    <label id="upload-zone" data-tip="Load static ELF binary">
+      <span class="icon">⬆</span>
+      <span id="binary-name" style="color:var(--muted)">Drop ELF binary…</span>
+      <input type="file" id="file-input" accept=".elf,*">
+    </label>
+
+    <div class="toolbar-sep"></div>
+    <button class="btn success" id="btn-run"   disabled>▶ Run   <span class="kbd">F9</span></button>
+    <button class="btn warn"    id="btn-step"  disabled>↓ Step  <span class="kbd">F7</span></button>
+    <button class="btn warn"    id="btn-stepo" disabled>→ Over  <span class="kbd">F8</span></button>
+    <button class="btn danger"  id="btn-stop"  disabled>■ Stop</button>
+    <button class="btn"         id="btn-reset" disabled>↺ Reset</button>
+    <div class="toolbar-sep"></div>
+    <div id="status-dot"></div>
+    <span id="status-label">No binary</span>
+    <span id="ip-display">RIP: —</span>
+    <div style="flex:1"></div>
+    <!-- COA toggle -->
+    <button class="btn" id="btn-coa-toggle" onclick="toggleCOA()" style="border-color:var(--accent);color:var(--accent)">
+      ⊞ COA Panel
+    </button>
+    <span style="font-size:10px;color:var(--muted)">
+      <kbd style="background:var(--card);border:1px solid var(--border2);padding:2px 5px;border-radius:3px">F2</kbd> BP
+      <kbd style="background:var(--card);border:1px solid var(--border2);padding:2px 5px;border-radius:3px">F7</kbd> Step
+      <kbd style="background:var(--card);border:1px solid var(--border2);padding:2px 5px;border-radius:3px">F9</kbd> Run
+    </span>
+  </div>
+
+  <!-- ═══════════════════ TAB BAR ═══════════════════ -->
+  <div id="tabbar">
+    <button class="tab-btn active" data-tab="disasm">Disassembly</button>
+    <button class="tab-btn" data-tab="memory">Hex View</button>
+    <button class="tab-btn" data-tab="trace">Trace</button>
+    <button class="tab-btn" data-tab="breakpoints">Breakpoints</button>
+    <button class="tab-btn" data-tab="analysis">Analysis</button>
+    <button class="tab-btn" data-tab="strings">Strings</button>
+    <button class="tab-btn" data-tab="sections">Sections</button>
+    <button class="tab-btn" data-tab="symbols">Symbols</button>
+    <button class="tab-btn" data-tab="info">Binary Info</button>
+  </div>
+
+  <!-- ═══════════════════ MAIN LAYOUT ═══════════════════ -->
+  <div id="main">
+
+    <!-- LEFT: Registers + Stack -->
+    <div id="left-col">
+      <div class="panel" style="flex:0 0 auto;max-height:52%">
+        <div class="panel-header">
+          <span class="panel-title">Registers</span>
+          <div class="panel-actions"><button class="btn" id="btn-refresh-regs">⟳</button></div>
+        </div>
+        <div class="panel-body" style="padding:0;overflow-y:auto">
+          <div id="reg-grid">
+            <div class="empty-state" style="height:80px"><div class="icon">⬡</div>Load a binary</div>
+          </div>
+        </div>
+      </div>
+      <div class="hdivider"></div>
+      <div class="panel" style="flex:1">
+        <div class="panel-header">
+          <span class="panel-title">Stack</span>
+          <div class="panel-actions"><button class="btn" id="btn-refresh-stack">⟳</button></div>
+        </div>
+        <div class="panel-body" style="padding:0">
+          <div id="stack-container" class="scroll-y" style="height:100%">
+            <div class="empty-state"><div class="icon">📚</div>No stack data</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- CENTER: Tab panels -->
+    <div id="center-col">
+
+      <div id="tab-disasm" class="tab-panel active">
+        <div id="goto-bar">
+          <input id="goto-input" type="text" placeholder="Jump to address (0x…) or symbol">
+          <button class="btn primary" id="goto-btn">Go</button>
+          <button class="btn" id="btn-disasm-entry" title="Entry point">Entry</button>
+        </div>
+        <div id="disasm-container">
+          <table class="disasm-table">
+            <thead>
+              <tr>
+                <th style="width:14px"></th>
+                <th style="color:var(--muted);font-size:10px;padding:2px 8px;font-weight:500">Address</th>
+                <th style="color:var(--muted);font-size:10px;padding:2px 8px;font-weight:500">Bytes</th>
+                <th style="color:var(--muted);font-size:10px;padding:2px 8px;font-weight:500">Mnemonic</th>
+                <th style="color:var(--muted);font-size:10px;padding:2px 8px;font-weight:500">Operands</th>
+                <th style="color:var(--muted);font-size:10px;padding:2px 8px;font-weight:500">Symbol</th>
+              </tr>
+            </thead>
+            <tbody id="disasm-tbody">
+              <tr><td colspan="6">
+                <div class="empty-state" style="height:200px">
+                  <div class="icon">🔍</div>Load an ELF binary to begin<br>
+                  <span style="font-size:10px;margin-top:4px;display:block">Static (F9/F7) or Dynamic (COA Panel → Processing)</span>
+                </div>
+              </td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div id="tab-memory" class="tab-panel">
+        <div id="mem-bar">
+          <input id="mem-addr-input" type="text" placeholder="Address (0x…)">
+          <input id="mem-size-input" type="number" value="256" min="16" max="4096">
+          <button class="btn primary" id="mem-go-btn">Read</button>
+          <button class="btn" id="btn-refresh-mem">⟳</button>
+        </div>
+        <div id="hex-container">
+          <div class="empty-state"><div class="icon">🗄</div>Enter an address to inspect memory</div>
+        </div>
+      </div>
+
+      <div id="tab-trace" class="tab-panel">
+        <div class="panel-header">
+          <span class="panel-title">Execution Trace — <span id="trace-total">0</span> instructions</span>
+          <div class="panel-actions"><button class="btn danger" id="btn-clear-trace">Clear</button></div>
+        </div>
+        <div id="trace-container">
+          <div class="empty-state"><div class="icon">📋</div>Run the emulator to record a trace</div>
+        </div>
+      </div>
+
+      <div id="tab-breakpoints" class="tab-panel">
+        <div class="panel-header"><span class="panel-title">Breakpoints &amp; Watchpoints</span></div>
+        <div id="bp-list" class="panel-body scroll-y" style="flex:1">
+          <div class="empty-state"><div class="icon">⬡</div>No breakpoints set<br><span style="font-size:10px">Double-click an instruction or press F2</span></div>
+        </div>
+        <div id="bp-add-form">
+          <input class="bp-input" id="bp-addr-input"  type="text" placeholder="Address (0x…)">
+          <input class="bp-input" id="bp-cond-input"  type="text" placeholder="Condition (e.g. rax==0)">
+          <select class="bp-type-select" id="bp-type-select">
+            <option value="exec">Execute</option>
+            <option value="read">Read</option>
+            <option value="write">Write</option>
+            <option value="access">Access</option>
+          </select>
+          <button class="btn primary" id="bp-add-btn">+ Add</button>
+        </div>
+      </div>
+
+      <div id="tab-analysis" class="tab-panel">
+        <div style="display:flex;gap:6px;padding:8px;background:var(--panel);border-bottom:1px solid var(--border);flex-wrap:wrap">
+          <button class="tab-btn analysis-tab-btn active" data-atab="stats">Overview</button>
+          <button class="tab-btn analysis-tab-btn" data-atab="freq">Insn Freq</button>
+          <button class="tab-btn analysis-tab-btn" data-atab="syscalls">Syscalls</button>
+          <button class="tab-btn analysis-tab-btn" data-atab="heatmap">Mem Heatmap</button>
+          <button class="tab-btn analysis-tab-btn" data-atab="rstrings">Runtime Strings</button>
+        </div>
+        <div id="stats-panel" class="scroll-y" style="flex:1">
+          <div class="empty-state"><div class="icon">📊</div>Run the emulator to generate analysis data</div>
+        </div>
+      </div>
+
+      <div id="tab-strings" class="tab-panel">
+        <div class="panel-header"><span class="panel-title">Static Strings</span></div>
+        <div id="strings-list" class="panel-body scroll-y" style="flex:1">
+          <div class="empty-state"><div class="icon">💬</div>Load a binary</div>
+        </div>
+      </div>
+
+      <div id="tab-sections" class="tab-panel">
+        <div class="panel-header"><span class="panel-title">ELF Sections</span></div>
+        <div class="panel-body scroll-y" style="flex:1">
+          <div class="section-bar-wrapper" id="sections-list">
+            <div class="empty-state"><div class="icon">📦</div>Load a binary</div>
+          </div>
+        </div>
+      </div>
+
+      <div id="tab-symbols" class="tab-panel">
+        <div id="symbols-container" class="scroll-y" style="flex:1">
+          <table class="sym-table">
+            <thead><tr><th>Address</th><th>Name</th><th>Type</th><th>Size</th></tr></thead>
+            <tbody id="symbols-tbody">
+              <tr><td colspan="4"><div class="empty-state"><div class="icon">🔣</div>Load a binary</div></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div id="tab-info" class="tab-panel">
+        <div id="info-panel" class="scroll-y" style="flex:1">
+          <div class="empty-state"><div class="icon">ℹ</div>Load an ELF binary</div>
+        </div>
+      </div>
+
+    </div><!-- end center-col -->
+
+    <!-- RIGHT: Call Stack + Memory Map -->
+    <div id="right-col">
+      <div class="panel" style="flex:0 0 auto;max-height:45%">
+        <div class="panel-header">
+          <span class="panel-title">Call Stack</span>
+          <div class="panel-actions"><button class="btn" id="btn-refresh-callstack">⟳</button></div>
+        </div>
+        <div id="callstack-container" class="panel-body scroll-y" style="padding:0">
+          <div class="empty-state" style="height:80px"><div class="icon">⬡</div>No data</div>
+        </div>
+      </div>
+      <div class="hdivider"></div>
+      <div class="panel">
+        <div class="panel-header">
+          <span class="panel-title">Memory Map</span>
+          <div class="panel-actions"><button class="btn" id="btn-refresh-regions">⟳</button></div>
+        </div>
+        <div id="regions-container" class="panel-body scroll-y" style="padding:6px">
+          <div class="empty-state" style="height:80px"><div class="icon">🗺</div>No regions</div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- end main -->
+
+  <!-- ═══════════════════ COA PANEL ═══════════════════ -->
+  <div id="coa-resize-handle"></div>
+  <div id="coa-panel" class="hidden">
+
+    <!-- COA header -->
+    <div id="coa-header">
+      <span class="coa-title">⊞ COA Monitor</span>
+      <span id="coa-pie-badge" class="coa-badge badge-static">STATIC</span>
+      <div class="toolbar-sep"></div>
+      <!-- Summary metrics -->
+      <div id="coa-summary-bar" style="flex:1;height:auto;padding:0;border:none;background:none;gap:14px;display:flex">
+        <div class="coa-sum-item"><span class="coa-sum-label">IPC</span> <span class="coa-sum-val" id="coa-ipc">—</span></div>
+        <div class="coa-sum-item"><span class="coa-sum-label">CPI</span> <span class="coa-sum-val" id="coa-cpi">—</span></div>
+        <div class="coa-sum-sep">|</div>
+        <div class="coa-sum-item"><span class="coa-sum-label">L1</span> <span class="coa-sum-val" id="coa-l1hit">—</span></div>
+        <div class="coa-sum-item"><span class="coa-sum-label">L2</span> <span class="coa-sum-val" id="coa-l2hit">—</span></div>
+        <div class="coa-sum-sep">|</div>
+        <div class="coa-sum-item"><span class="coa-sum-label">BP</span> <span class="coa-sum-val" id="coa-bpred">—</span></div>
+        <div class="coa-sum-sep">|</div>
+        <div class="coa-sum-item"><span class="coa-sum-label">Stalls</span> <span class="coa-sum-val" id="coa-stalls">—</span></div>
+        <div class="coa-sum-item"><span class="coa-sum-label">Retired</span> <span class="coa-sum-val" id="coa-insns">—</span></div>
+        <div class="coa-sum-item"><span class="coa-sum-label" style="color:var(--red)">Faults</span> <span class="coa-sum-val" id="coa-faults" style="color:var(--red)">0</span></div>
+      </div>
+      <div class="toolbar-sep"></div>
+      <button class="btn" onclick="coaCollapse()" style="padding:2px 8px;font-size:11px">▼</button>
+      <button class="btn danger" onclick="coaDestroy()" style="padding:2px 8px;font-size:11px">✕</button>
+    </div>
+
+    <!-- COA tab bar -->
+    <div id="coa-tabbar">
+      <button class="coa-tab-btn active" data-ctab="memory">🗺 Memory Layout</button>
+      <button class="coa-tab-btn" data-ctab="branch">⑂ Branch Layout</button>
+      <button class="coa-tab-btn" data-ctab="pipeline">⚙ Pipeline Layout</button>
+      <button class="coa-tab-btn" data-ctab="cache">💾 Cache Layout</button>
+      <button class="coa-tab-btn" data-ctab="processing">⚡ Processing</button>
+    </div>
+
+    <!-- MEMORY LAYOUT PANEL -->
+    <div class="coa-panel-body" data-cpanel="memory">
+      <div class="coa-2col">
+        <div>
+          <div class="coa-section-title">Root Cause Analysis</div>
+          <div id="coa-root-cause"><div class="coa-empty">Load a binary to analyse…</div></div>
+          <div class="coa-section-title" style="margin-top:12px">Address Space Map</div>
+          <div id="coa-addr-map"><div class="coa-empty">No memory regions</div></div>
+        </div>
+        <div>
+          <div class="coa-section-title">Relocation Table</div>
+          <div id="coa-reloc-table"><div class="coa-empty">No relocations</div></div>
+          <div class="coa-section-title" style="margin-top:12px">Unmapped Access Log</div>
+          <div id="coa-unmapped-log"><div class="coa-ok">✓ No unmapped accesses</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- BRANCH LAYOUT PANEL -->
+    <div class="coa-panel-body hidden" data-cpanel="branch">
+      <div id="coa-branch-body">
+        <div class="empty-state"><div class="icon">⑂</div>Step or run to see branch data</div>
+      </div>
+    </div>
+
+    <!-- PIPELINE LAYOUT PANEL -->
+    <div class="coa-panel-body hidden" data-cpanel="pipeline">
+      <div id="coa-pipeline-body">
+        <div class="empty-state"><div class="icon">⚙</div>Step or run to see pipeline data</div>
+      </div>
+    </div>
+
+    <!-- CACHE LAYOUT PANEL -->
+    <div class="coa-panel-body hidden" data-cpanel="cache">
+      <div id="coa-cache-body">
+        <div class="empty-state"><div class="icon">💾</div>Step or run to see cache data</div>
+      </div>
+    </div>
+
+    <!-- PROCESSING PANEL -->
+    <div class="coa-panel-body hidden" data-cpanel="processing">
+      <div id="coa-processing-body">
+        <div class="empty-state"><div class="icon">⚡</div>Step or run to see processing data</div>
+      </div>
+    </div>
+
+  </div><!-- end coa-panel -->
+
+</div><!-- end app -->
+
+<!-- Context Menu -->
+<div id="ctx-menu">
+  <div class="ctx-item" id="ctx-bp">⬤ Toggle Breakpoint</div>
+  <div class="ctx-item" id="ctx-set-ip">→ Set RIP here</div>
+  <div class="ctx-sep"></div>
+  <div class="ctx-item" id="ctx-goto">🔍 Disassemble here</div>
+  <div class="ctx-item" id="ctx-hexview">🗄 View in Hex</div>
+</div>
+
+<div id="toast-container"></div>
+
+<script src="/static/js/ui.js"></script>
+<script src="/static/js/coa.js"></script>
+<script>
+/* ── Right-column helpers ── */
+async function refreshCallstack() {
+  try {
+    const frames = await API.get('/api/callstack');
+    const el = document.getElementById('callstack-container');
+    if (!frames.length) { el.innerHTML = '<div class="empty-state" style="height:80px"><div class="icon">⬡</div>Empty</div>'; return; }
+    el.innerHTML = frames.map((f,i) => `
+      <div class="callstack-frame" onclick="_ld(${f.address})">
+        <span class="cf-num">#${i}</span>
+        <span class="cf-addr">${_h(f.address)}</span>
+        <span class="cf-sym">${_eh(f.symbol||'')}</span>
+      </div>`).join('');
+  } catch (_) {}
+}
+
+async function refreshRegions() {
+  try {
+    const regions = await API.get('/api/regions');
+    const el = document.getElementById('regions-container');
+    if (!regions.length) { el.innerHTML = '<div class="empty-state" style="height:80px"><div class="icon">🗺</div>No mapped regions</div>'; return; }
+    const permStr = p => [(p&4)?'R':'-',(p&2)?'W':'-',(p&1)?'X':'-'].join('');
+    el.innerHTML = regions.map(r => `
+      <div class="stack-frame" style="cursor:pointer" onclick="_lm(${r.base},128)">
+        <span class="sf-addr">${_h(r.base)}</span>
+        <span class="sf-val" style="font-size:10px">${_fb(r.size)}</span>
+        <span class="sf-sym" style="color:${(r.perms&1)?'var(--red)':'var(--muted)'}">${permStr(r.perms)}</span>
+        <span class="sf-sym">${_eh(r.label)}</span>
+      </div>`).join('');
+  } catch (_) {}
+}
+
+/* ── COA panel resize ── */
+let _coaCollapsed = false;
+function toggleCOA() {
+  const p = document.getElementById('coa-panel');
+  if (p.classList.contains('hidden')) {
+    p.classList.remove('hidden');
+    if (window.S?.loaded) coaInit();
+  } else {
+    _coaCollapsed = !_coaCollapsed;
+    p.classList.toggle('collapsed', _coaCollapsed);
+  }
+}
+function coaCollapse() {
+  _coaCollapsed = true;
+  document.getElementById('coa-panel').classList.add('collapsed');
+}
+
+// COA resize drag
+(function() {
+  const handle = document.getElementById('coa-resize-handle');
+  const panel  = document.getElementById('coa-panel');
+  let dragging = false, startY = 0, startH = 0;
+  handle.addEventListener('mousedown', e => {
+    dragging = true; startY = e.clientY;
+    startH = panel.offsetHeight;
+    document.body.style.cursor = 'row-resize';
+    document.body.style.userSelect = 'none';
+  });
+  document.addEventListener('mousemove', e => {
+    if (!dragging) return;
+    const newH = Math.max(120, startH - (e.clientY - startY));
+    panel.style.height = newH + 'px';
+    panel.classList.remove('collapsed');
+    _coaCollapsed = false;
+  });
+  document.addEventListener('mouseup', () => {
+    dragging = false;
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+  });
+})();
+
+/* ── Wire up right column buttons ── */
+document.getElementById('btn-refresh-callstack').addEventListener('click', refreshCallstack);
+document.getElementById('btn-refresh-regions').addEventListener('click', refreshRegions);
+document.getElementById('btn-disasm-entry').addEventListener('click', () => _ld(window.S?.ip || 0));
+
+/* ── Hook: open COA panel automatically after binary load ── */
+const _origUploadChange = document.getElementById('file-input').onchange;
+document.getElementById('file-input').addEventListener('change', () => {
+  // coaInit() is called from ui.js after successful upload via window.onBinaryLoaded
+});
+
+/* ── Notify COA panel when binary loads ── */
+window.onBinaryLoaded = function() {
+  const p = document.getElementById('coa-panel');
+  p.classList.remove('hidden');
+  coaInit();
+};
+</script>
+</body>
+</html>
